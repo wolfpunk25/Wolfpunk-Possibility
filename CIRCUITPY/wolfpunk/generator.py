@@ -62,12 +62,20 @@ class Generator:
                     best_deg, best_pos, best_dist = deg, pos, dist
         return best_deg, best_pos
 
-    def next_note(self, index, chord_degree, wildness_scale=1.0):
+    def next_note(self, index, chord_degree, wildness_scale=1.0, next_chord_degree=None, resolve=0.0):
         slot = index % self.steps
         if self.frozen:
             return self._buffer[slot]
 
-        chord_tones = diatonic_triad(chord_degree)
+        # cadential pull: as the current chord nears its end, `resolve`
+        # (0..1) is the chance of drawing from the *upcoming* chord's tones
+        # instead of the current one, so the line leans toward the next
+        # harmony rather than the change landing abruptly
+        if next_chord_degree is not None and self._rng.random() < resolve:
+            chord_tones = diatonic_triad(next_chord_degree)
+        else:
+            chord_tones = diatonic_triad(chord_degree)
+
         # wildness_scale lets the caller tighten this toward chord tones on
         # strong beats and loosen it on weak ones, so the harmony has a
         # felt pulse instead of being uniformly random-or-not everywhere

@@ -91,6 +91,7 @@ class Voice:
         self._note_on_time = None
         self._playing = False
         self._extra_filter_hz = 0.0
+        self._current_decay_time = self.decay_time
 
     def _crossfaded(self):
         if self._blend <= 0.5:
@@ -121,7 +122,7 @@ class Voice:
         self.level = _clamp(level, 0.15, 1.0)
 
     def _filter_for(self, elapsed):
-        decay_frac = 2 ** (-elapsed / max(self.decay_time, 0.005))
+        decay_frac = 2 ** (-elapsed / max(self._current_decay_time, 0.005))
         depth_hz = self.env_depth * ENV_FILTER_RANGE_HZ * decay_frac
         cutoff = self.cutoff_base + depth_hz + self._extra_filter_hz
         cutoff = _clamp(cutoff, FILTER_MIN_HZ, FILTER_MAX_HZ)
@@ -129,15 +130,18 @@ class Voice:
         # helper - build the Biquad directly instead.
         return synthio.Biquad(synthio.FilterMode.LOW_PASS, frequency=cutoff, Q=self.resonance)
 
-    def trigger(self, midi_note, extra_filter_hz=0.0, accent=1.0):
+    def trigger(self, midi_note, extra_filter_hz=0.0, accent=1.0, decay_scale=1.0):
         self._note_on_time = time.monotonic()
         self._playing = True
         self._extra_filter_hz = extra_filter_hz
+        # per-note length: downbeats ring a little longer, busy off-beats
+        # get clipped shorter, instead of every note lasting identically
+        self._current_decay_time = _clamp(self.decay_time * decay_scale, 0.02, 2.5)
 
         amp = min(self.level * (1.0 + self.drive * 2.5) * accent, 3.0)
         envelope = synthio.Envelope(
             attack_time=ATTACK_TIME,
-            decay_time=self.decay_time,
+            decay_time=self._current_decay_time,
             sustain_level=0.0,
             release_time=RELEASE_TIME,
         )
@@ -163,7 +167,7 @@ class Voice:
         if abs(self.env_depth) < 0.01:
             return  # flat cutoff, nothing to sweep
         elapsed = time.monotonic() - self._note_on_time
-        if elapsed > self.decay_time * 6:
+        if elapsed > self._current_decay_time * 6:
             self._playing = False  # envelope has settled; stop polling
             return
         self.note.filter = self._filter_for(elapsed)

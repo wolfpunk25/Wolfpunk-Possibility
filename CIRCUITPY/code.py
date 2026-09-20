@@ -161,27 +161,46 @@ class App:
     # -- generative core -----------------------------------------------
     def _metric_weights(self, index):
         """How strongly this subtick should lean toward chord tones
-        (wildness_scale) and how loud it should land (accent), based on
-        where it falls in the beat/chord grid - real melodies favour chord
-        tones and land harder on strong beats rather than treating every
-        subdivision identically."""
+        (wildness_scale), how loud it should land (accent), how long the
+        note should ring (decay_scale), and how strongly it should lean
+        toward the *next* chord instead (resolve) - based on where it
+        falls in the beat/chord grid. Real melodies favour chord tones and
+        land harder/longer on strong beats, and lean into the next chord
+        as the current one runs out, rather than treating every
+        subdivision identically and changing chords abruptly."""
         subdiv = max(self.clock.subdivisions_per_beat, 1)
         chord_span = subdiv * max(self.chords.beats_per_chord, 1)
-        if index % chord_span == 0:
-            return 0.15, 1.0  # the chord's downbeat: mostly chord tones, full accent
+        pos_in_chord = index % chord_span
+
+        last_beat_start = chord_span - subdiv
+        if pos_in_chord >= last_beat_start:
+            progress = (pos_in_chord - last_beat_start + 1) / subdiv  # 1/subdiv .. 1.0
+            resolve = 0.25 + 0.55 * progress
+        else:
+            resolve = 0.0
+
+        if pos_in_chord == 0:
+            return 0.15, 1.0, 1.3, resolve  # downbeat: mostly chord tones, full accent, longest note
         if index % subdiv == 0:
-            return 0.5, 0.8  # any other beat start: moderate lean and accent
-        return 1.0, 0.55  # off-beat subdivision: full wildness, quieter
+            return 0.5, 0.8, 1.0, resolve  # other beat starts: moderate lean/accent, normal length
+        return 1.0, 0.55, 0.6, resolve  # off-beat: full wildness, quieter, shorter
 
     def _on_subtick(self, index):
         chord_degree = self.chords.current_degree()
-        wildness_scale, accent = self._metric_weights(index)
+        next_chord_degree = self.chords.slots[(self.chords.index + 1) % len(self.chords.slots)]
+        wildness_scale, accent, decay_scale, resolve = self._metric_weights(index)
         if self.generator.frozen:
             result = self.generator.next_note(index, chord_degree)
         else:
             hit = self._euclid[index % len(self._euclid)]
             if hit:
-                result = self.generator.next_note(index, chord_degree, wildness_scale=wildness_scale)
+                result = self.generator.next_note(
+                    index,
+                    chord_degree,
+                    wildness_scale=wildness_scale,
+                    next_chord_degree=next_chord_degree,
+                    resolve=resolve,
+                )
             else:
                 self.generator.rest(index)
                 result = None
@@ -193,7 +212,7 @@ class App:
         note = midi_note(self.root_index, scale_name, degree, octave=octave + self.octave_offset)
         note = int(clamp(note, 0, 127))
         if not self.muted:
-            self.voice.trigger(note, accent=accent)
+            self.voice.trigger(note, accent=accent, decay_scale=decay_scale)
             velocity = int(clamp(VELOCITY * accent, 20, 127))
             self._midi_note_on(note, velocity)
 
