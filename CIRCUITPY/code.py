@@ -22,6 +22,7 @@ import wolfpunk.ui as ui_mod
 
 MIDI_CHANNEL = 0  # channel 1
 VELOCITY = 100
+PHRASE_LAPS = 2  # laps through the 4-chord loop per phrase, before it breathes
 
 PAGES = ["WILDNESS", "DENSITY", "ACCUM", "WAVE", "FILTER", "ENV", "DRIVE", "TEMPO", "SCALE"]
 
@@ -185,14 +186,30 @@ class App:
             return 0.5, 0.8, 1.0, resolve  # other beat starts: moderate lean/accent, normal length
         return 1.0, 0.55, 0.6, resolve  # off-beat: full wildness, quieter, shorter
 
+    def _phrase_breathing(self):
+        """True while we're in the last chord of a phrase (every
+        PHRASE_LAPS laps through the loop) - the bar that thins out and
+        leans hard into the turnaround back to the tonic, like a phrase
+        taking a breath before a cadence rather than running on forever."""
+        last_slot = len(self.chords.slots) - 1
+        return self.chords.laps % PHRASE_LAPS == PHRASE_LAPS - 1 and self.chords.index == last_slot
+
     def _on_subtick(self, index):
         chord_degree = self.chords.current_degree()
         next_chord_degree = self.chords.slots[(self.chords.index + 1) % len(self.chords.slots)]
         wildness_scale, accent, decay_scale, resolve = self._metric_weights(index)
+        breathing = self._phrase_breathing()
+
         if self.generator.frozen:
             result = self.generator.next_note(index, chord_degree)
         else:
             hit = self._euclid[index % len(self._euclid)]
+            subdiv = max(self.clock.subdivisions_per_beat, 1)
+            if breathing:
+                if hit and index % subdiv != 0:
+                    hit = False  # thin to just the beat pulse during the breath
+                resolve = min(1.0, resolve + 0.3)  # lean harder into the coming tonic
+                decay_scale *= 1.4  # let the breath's notes ring longer, more relaxed
             if hit:
                 result = self.generator.next_note(
                     index,

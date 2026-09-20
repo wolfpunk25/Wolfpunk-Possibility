@@ -16,6 +16,7 @@ class ChordProgression:
         self.beats_per_chord = 4
         self.index = 0
         self._beat_count = 0
+        self.laps = 0  # how many full cycles through the progression have completed
 
     def current_degree(self):
         return self.slots[self.index]
@@ -38,5 +39,7 @@ class ChordProgression:
         if self._beat_count > self.beats_per_chord:
             self._beat_count = 1
             self.index = (self.index + 1) % len(self.slots)
+            if self.index == 0:
+                self.laps += 1
             return True
         return False
