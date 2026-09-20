@@ -68,6 +68,8 @@ class App:
         self.last_midi_note = None
         self._push_all_params()
         self._last_render = 0.0
+        self._flash_text = ""
+        self._flash_until = 0.0
 
     # -- parameter push-through --------------------------------------
     def _push_all_params(self):
@@ -198,9 +200,9 @@ class App:
         elif key_number == ui_mod.KEY_OCT_UP:
             self.octave_offset = int(clamp(self.octave_offset + 1, -3, 3))
         elif key_number == ui_mod.KEY_FREEZE:
-            self.generator.frozen = not self.generator.frozen
+            self._toggle_freeze()
         elif key_number == ui_mod.KEY_REROLL:
-            self.generator.reroll()
+            self._reroll()
         elif key_number == ui_mod.KEY_MUTE:
             self.muted = not self.muted
             if self.muted:
@@ -233,10 +235,25 @@ class App:
             self.midi.send(Start())
 
     def handle_encoder_switch(self, held_ms):
-        if held_ms > 600:
-            self.generator.frozen = not self.generator.frozen
+        # a clicky button can easily take longer than expected to press and
+        # release, so give a generous margin before treating it as a
+        # deliberate long-press rather than a quick click
+        if held_ms > 900:
+            self._toggle_freeze()
         else:
-            self.generator.reroll()
+            self._reroll()
+
+    def _reroll(self):
+        self.generator.reroll()
+        self._flash("REROLL")
+
+    def _toggle_freeze(self):
+        self.generator.frozen = not self.generator.frozen
+        self._flash("FROZEN" if self.generator.frozen else "UNFROZEN")
+
+    def _flash(self, text):
+        self._flash_text = text
+        self._flash_until = time.monotonic() + 0.3
 
     # -- display ----------------------------------------------------
     def _render(self):
@@ -274,7 +291,12 @@ class App:
         scale_name = SCALE_NAMES[self.scale_index]
         transport = "RUN" if self.clock.running else "STOP"
         status_line = f"{int(self.clock.bpm)}bpm {root_name}{scale_name} {transport}"
-        flags = ("FRZ " if self.generator.frozen else "") + ("MUT" if self.muted else "")
+        flashing = time.monotonic() < self._flash_until
+        flags = (
+            (f"{self._flash_text} " if flashing else "")
+            + ("FRZ " if self.generator.frozen else "")
+            + ("MUT" if self.muted else "")
+        )
         info_line = f"oct{self.octave_offset:+d} {self.hits}/{self.steps} {flags}"
 
         self.ui.render(page_line, status_line, info_line, self.chords.slots, self.chords.index)
@@ -285,6 +307,7 @@ class App:
             self.generator.frozen,
             self.muted,
             self.shift_held,
+            flash=flashing,
         )
 
     # -- main loop --------------------------------------------------

@@ -90,9 +90,12 @@ class UI:
             self._draw_box(i, i == active_slot)
             self.box_labels[i].text = ROMAN[chord_slots[i]]
 
-    def leds(self, chord_slots, active_slot, running, frozen, muted, shift_held):
+    def leds(self, chord_slots, active_slot, running, frozen, muted, shift_held, flash=False):
         px = self.macropad.pixels
         for i in KEY_CHORDS:
+            if flash:
+                px[i] = (255, 255, 255)
+                continue
             hue = chord_slots[i] * _DEGREE_HUE_STEP
             base = _wheel(hue)
             px[i] = base if i == active_slot else _scale_rgb(base, 0.3)
@@ -100,7 +103,7 @@ class UI:
         px[KEY_OCT_DOWN] = (0, 40, 90)
         px[KEY_OCT_UP] = (90, 45, 0)
         px[KEY_FREEZE] = (0, 130, 130) if frozen else (0, 25, 25)
-        px[KEY_REROLL] = (70, 70, 70)
+        px[KEY_REROLL] = (255, 255, 255) if flash else (70, 70, 70)
         px[KEY_MUTE] = (110, 0, 0) if muted else (20, 0, 0)
         px[KEY_PLAY] = (0, 90, 0) if running else (90, 0, 0)
         px[KEY_TAP] = (70, 60, 0)
