@@ -18,17 +18,27 @@ don't need the other one.
 
 - A 4-chord diatonic progression (default I-V-vi-IV) you can jump around
   live or edit on the fly, that the melody always follows.
-- A stochastic melody generator: each note either stays on the current
-  chord's tones or reaches into the wider scale (`WILDNESS`), with a slow
-  pitch drift across repetitions rather than independent randomness each
-  time (`ACCUM`).
+- A stochastic melody generator with real melodic shape, not just
+  scale-correct randomness: notes move mostly by step with occasional
+  leaps (`ACCUM`) rather than independently each hit, chord tones vs. the
+  wider scale is a probability (`WILDNESS`), and downbeats land harder,
+  longer and more anchored to the chord than off-beats do.
+- Cadential pull - the melody leans toward the *next* chord's tones as the
+  current one nears its end, so changes feel anticipated - and phrase
+  breathing, where the loop's final bar thins out and relaxes every couple
+  of laps before the turnaround, rather than running at constant density
+  forever. See [docs/oxi-one-notes.md](docs/oxi-one-notes.md#making-it-actually-musical)
+  for the music-theory reasoning behind both.
 - A Euclidean rhythm gate (`DENSITY`) instead of a fixed step pattern -
   evenly-spaced hits, adjustable count and grid length.
 - `FREEZE` to catch whatever's currently playing and loop it exactly;
   `REROLL` to throw it away for something new; `MUTE` to silence it without
-  resetting its internal state.
+  resetting its internal state - both FREEZE and REROLL confirm with an
+  LED flash and on-screen text.
 - The same oscillator/filter/envelope/drive voice as Wolfpunk Foam,
-  playing live through the onboard speaker in parallel with USB MIDI out.
+  playing live through the onboard speaker in parallel with USB MIDI out,
+  now with per-note velocity and length that vary with metric position
+  instead of every note sounding identical.
 - A live chord/page/parameter readout on the OLED and chord-coloured key
   LEDs.
 
@@ -74,7 +84,7 @@ CIRCUITPY/            everything that goes on the board
   wolfpunk/
     voice.py            oscillator + filter + envelope (ported from Wolfpunk Foam)
     chords.py            the 4-slot diatonic chord loop
-    generator.py          the stochastic melody engine + accumulator + freeze/reroll
+    generator.py          the stochastic melody engine: melodic walk, cadential pull, freeze/reroll
     euclid.py             Euclidean rhythm generator
     clock.py              tempo, beat/subtick scheduling, MIDI clock
     scales.py             7 seven-note scales + diatonic triad construction
@@ -88,7 +98,10 @@ tools/
 ## Changing things
 
 - MIDI channel: `MIDI_CHANNEL` at the top of `code.py`.
-- Note velocity: `VELOCITY` in the same place.
+- Base note velocity: `VELOCITY` in the same place (actual velocity sent
+  varies from this per the metric accent - see `App._metric_weights()`).
+- How many laps per phrase before the loop breathes: `PHRASE_LAPS`, also
+  at the top of `code.py`.
 - Default chord progression: `DEFAULT_SLOTS` in `wolfpunk/chords.py`.
 - LED brightness: `macropad.pixels.brightness` in `wolfpunk/ui.py`'s
   `UI.__init__`.

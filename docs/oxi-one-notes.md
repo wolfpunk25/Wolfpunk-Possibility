@@ -21,7 +21,7 @@ transcript's most true version.
 |---|---|
 | Chord sequencer as harmonic reference | The 4 `CHORD` keys: a 4-slot diatonic chord loop (default I-V-vi-IV). Tap to jump live; hold + turn the encoder to change that slot's chord. |
 | Stochastic mode (note pool + probabilities) | The generative engine in [`generator.py`](../CIRCUITPY/wolfpunk/generator.py): each hit picks a chord tone or a wider scale tone, weighted by `WILDNESS`. |
-| Accumulator (pitch drifts over repetitions) | `ACCUM` page: a slow random-walk drift added to each note's octave, instead of every note being independently random - see `Generator._accum`. |
+| Accumulator (pitch drifts over repetitions) | `ACCUM` page: rather than an independent random pitch each note, `Generator.next_note()` walks a continuous position (`Generator._last_pos`) and targets a step away from the *previous* note - `ACCUM` controls how big that step tends to be (small = stepwise, large = leaps), which is what actually produces the sense of drift over repetitions rather than scattered jumps. |
 | Euclidean rhythm generator | `DENSITY` page: an evenly-spaced Euclidean gate (hits out of steps) decides which subdivisions actually get a note. |
 | "A pattern can be completely fixed if you want it to repeat exactly" | `FREEZE`: stops drawing new randomness and replays the last full lap - both its rhythm and pitches - exactly. |
 | Muting a pattern vs. muting a whole sequencer | `MUTE`: silences the output but keeps the generator's internal state (accumulator, buffer) evolving underneath, so unmuting resumes mid-thought rather than restarting cold. |
@@ -36,14 +36,46 @@ transcript's most true version.
 A chord loop of 4 slots advances every `beats_per_chord` beats (`ACCUM`
 page, shift value). On every Euclidean-gated subdivision, the generator
 either stays on the current chord's root/third/fifth or reaches for a wider
-scale tone (`WILDNESS`), and nudges a slow pitch drift up or down an octave
-or so (`ACCUM`). The result plays live through the onboard speaker via the
-same `synthio` voice engine as [Wolfpunk Foam](https://github.com/wolfpunk25/Wolfpunk-Foam)
+scale tone (`WILDNESS`), moving mostly by small steps rather than jumping
+independently each note (`ACCUM` controls how big those steps tend to be).
+The result plays live through the onboard speaker via the same `synthio`
+voice engine as [Wolfpunk Foam](https://github.com/wolfpunk25/Wolfpunk-Foam)
 (oscillator blend, resonant filter, decay envelope, drive), and out over USB
 MIDI at the same time. `FREEZE` catches whatever's currently playing and
 loops it exactly; `REROLL` throws it away for something new; `MUTE` lets it
 keep thinking without being heard; the 4 `CHORD` keys let you conduct the
 harmony live while all of that keeps running underneath.
+
+## Making it actually musical
+
+The first working version generated technically scale-correct notes that
+still sounded aimless - each subdivision treated identically, independent
+of the previous note or where it fell in the bar. A second pass, grounded
+in ordinary melody/harmony theory (phrase structure, cadence types -
+perfect, imperfect, plagal, interrupted), added shape without adding
+controls: all of it reads off state the instrument already has (beat
+position, chord position, lap count), not new knobs.
+
+- **Melodic contour** - `next_note()` no longer picks a degree and octave
+  independently. It walks a continuous diatonic position and targets a
+  small, triangularly-distributed step from the previous note (mostly
+  stepwise, occasional leap), snapping to the nearest valid note in
+  whatever tone set `WILDNESS` allows that hit.
+- **Metric accent** - `App._metric_weights()` reads the beat/chord grid
+  every subtick: the downbeat of each chord leans hard toward chord tones,
+  lands loudest, and rings longest; other beat-starts lean moderately;
+  off-beat subdivisions get full `WILDNESS`, are quieter, and are clipped
+  shorter. Velocity sent over MIDI follows the same shape, instead of a
+  flat constant.
+- **Cadential pull** - as a chord's span nears its end, there's a rising
+  chance (`resolve`) of drawing from the *next* chord's tones instead of
+  the current one, so changes are anticipated rather than landing cold.
+- **Phrase breathing** - every `PHRASE_LAPS` (2, in `code.py`) laps through
+  the loop, the final chord thins to just the beat pulse and lets notes
+  ring longer, leaning even harder into the cadential pull. The default
+  I-V-vi-IV loop's own IV-I turnaround each lap is already shaped like a
+  plagal cadence, so breathing into it reads as a phrase actually ending
+  rather than just going quiet.
 
 ## Controls
 
@@ -62,9 +94,12 @@ harmony live while all of that keeps running underneath.
   diatonic triad built on a scale degree, shown as a roman numeral).
 - **OCT- / OCT+** - shift the whole melody up or down an octave, live.
 - **FREEZE** - toggle: stop generating new material and loop the last full
-  bar exactly, both its rhythm and its pitches.
+  bar exactly, both its rhythm and its pitches. Confirms with a white LED
+  flash and "FROZEN"/"UNFROZEN" on screen, same as REROLL.
 - **REROLL** - throw away the current generative state and start fresh from
-  a new random seed. Also un-freezes if it was frozen.
+  a new random seed. Also un-freezes if it was frozen. Flashes the chord
+  keys white and shows "REROLL" on screen briefly, so it's obvious the
+  press registered even though the actual musical change is often subtle.
 - **MUTE** - toggle: silence the output (speaker + MIDI) without stopping
   the generator's own internal evolution.
 - **PLAY** - start/stop the internal clock (also sends MIDI Start/Stop).
@@ -72,9 +107,36 @@ harmony live while all of that keeps running underneath.
 - **PAGE** - tap to cycle the encoder's page (`WILDNESS`, `DENSITY`,
   `ACCUM`, `WAVE`, `FILTER`, `ENV`, `DRIVE`, `TEMPO`, `SCALE`). Hold it down
   and turn the encoder to edit that page's *second* parameter instead.
-- **Encoder** - turn to edit the current page's value. Short click:
-  REROLL. Long-press (>0.6s): toggle FREEZE - same actions as the dedicated
-  keys, for quick access without moving your hand.
+- **Encoder** - turn to edit the current page's value. Short click: REROLL.
+  Long-press (>0.9s): toggle FREEZE - same actions as the dedicated keys,
+  for quick access without moving your hand. The threshold is deliberately
+  generous: a real clicky button can easily take longer than you'd expect
+  to fully press and release, and a "quick click" landing just past the
+  cutoff silently becomes a long-press with different (and much subtler)
+  feedback - if the encoder ever seems unresponsive, that's the first
+  thing to suspect before assuming it's broken.
+
+### Page values, in plain terms
+
+- **WILDNESS**: chance a note strays from the chord tones into the wider
+  scale. Downbeats mostly ignore this and stay anchored regardless, so it
+  mainly shapes how adventurous the off-beat notes get. Shift: `register`,
+  how many octaves the line can roam before being pulled back to center.
+- **DENSITY**: how many of the `steps` grid positions actually get a note
+  (a Euclidean gate, evenly spaced rather than random). Shift: the grid
+  length itself (`steps`, 8-32).
+- **ACCUM**: how big a melodic step tends to be, note to note - low is
+  smooth/stepwise, high is more angular. Shift: `beats_per_chord`, how long
+  each chord in the loop holds before advancing.
+- **WAVE**: sweeps the oscillator triangle -> saw -> square. Shift: pulse
+  width (only audible toward the square end).
+- **FILTER**: low-pass cutoff. Shift: resonance.
+- **ENV**: decay time. Shift: how strongly (and in which direction) the
+  decay sweeps the filter cutoff.
+- **DRIVE**: overdrive/soft-clip amount. Shift: overall output level.
+- **TEMPO**: BPM. Shift: subdivisions per beat (the melody's grid
+  resolution).
+- **SCALE**: which of the 7 scales. Shift: root note.
 
 ## Installing it
 
