@@ -147,10 +147,10 @@ class App:
                 self.scale_index = (self.scale_index + delta) % len(SCALE_NAMES)
 
     # -- MIDI helpers -----------------------------------------------
-    def _midi_note_on(self, note):
+    def _midi_note_on(self, note, velocity=VELOCITY):
         if self.last_midi_note is not None:
             self.midi.send(NoteOff(self.last_midi_note, 0))
-        self.midi.send(NoteOn(note, VELOCITY))
+        self.midi.send(NoteOn(note, velocity))
         self.last_midi_note = note
 
     def _midi_note_off(self):
@@ -159,14 +159,29 @@ class App:
             self.last_midi_note = None
 
     # -- generative core -----------------------------------------------
+    def _metric_weights(self, index):
+        """How strongly this subtick should lean toward chord tones
+        (wildness_scale) and how loud it should land (accent), based on
+        where it falls in the beat/chord grid - real melodies favour chord
+        tones and land harder on strong beats rather than treating every
+        subdivision identically."""
+        subdiv = max(self.clock.subdivisions_per_beat, 1)
+        chord_span = subdiv * max(self.chords.beats_per_chord, 1)
+        if index % chord_span == 0:
+            return 0.15, 1.0  # the chord's downbeat: mostly chord tones, full accent
+        if index % subdiv == 0:
+            return 0.5, 0.8  # any other beat start: moderate lean and accent
+        return 1.0, 0.55  # off-beat subdivision: full wildness, quieter
+
     def _on_subtick(self, index):
         chord_degree = self.chords.current_degree()
+        wildness_scale, accent = self._metric_weights(index)
         if self.generator.frozen:
             result = self.generator.next_note(index, chord_degree)
         else:
             hit = self._euclid[index % len(self._euclid)]
             if hit:
-                result = self.generator.next_note(index, chord_degree)
+                result = self.generator.next_note(index, chord_degree, wildness_scale=wildness_scale)
             else:
                 self.generator.rest(index)
                 result = None
@@ -178,8 +193,9 @@ class App:
         note = midi_note(self.root_index, scale_name, degree, octave=octave + self.octave_offset)
         note = int(clamp(note, 0, 127))
         if not self.muted:
-            self.voice.trigger(note)
-            self._midi_note_on(note)
+            self.voice.trigger(note, accent=accent)
+            velocity = int(clamp(VELOCITY * accent, 20, 127))
+            self._midi_note_on(note, velocity)
 
     # -- key handling ---------------------------------------------------
     def handle_key(self, key_number, pressed):

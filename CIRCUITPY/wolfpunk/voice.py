@@ -129,12 +129,12 @@ class Voice:
         # helper - build the Biquad directly instead.
         return synthio.Biquad(synthio.FilterMode.LOW_PASS, frequency=cutoff, Q=self.resonance)
 
-    def trigger(self, midi_note, extra_filter_hz=0.0):
+    def trigger(self, midi_note, extra_filter_hz=0.0, accent=1.0):
         self._note_on_time = time.monotonic()
         self._playing = True
         self._extra_filter_hz = extra_filter_hz
 
-        amp = min(self.level * (1.0 + self.drive * 2.5), 3.0)
+        amp = min(self.level * (1.0 + self.drive * 2.5) * accent, 3.0)
         envelope = synthio.Envelope(
             attack_time=ATTACK_TIME,
             decay_time=self.decay_time,
